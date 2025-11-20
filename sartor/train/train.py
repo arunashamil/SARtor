@@ -22,6 +22,7 @@ from transformers import VisionEncoderDecoderModel , ViTImageProcessor
 from transformers import AutoTokenizer ,  GPT2Config , default_data_collator
 
 from sartor.modules.dataset import ImgDataset
+from sartor.modules.compute_metrics import compute_metrics
 
 
 @hydra.main(version_base=None, config_path="../../config", config_name="config")
@@ -54,8 +55,10 @@ def main(config: DictConfig) -> None:
         ]
     )
 
-    train_df = pd.read_csv(config["train"]["caps_dir"])
-    
+    df = pd.read_csv(config["train"]["caps_dir"])
+    df.columns = [col.strip() for col in df.columns]
+    train_df, val_df = train_test_split(df)
+
     train_dataset = ImgDataset(
         train_df, 
         root_dir=config["train"]["imgs_dir"],
@@ -64,11 +67,30 @@ def main(config: DictConfig) -> None:
         transform=transformations
         )
     
+    val_dataset = ImgDataset(
+        val_df , 
+        root_dir = config["train"]["imgs_dir"],
+        tokenizer=tokenizer,
+        feature_extractor = feature_extractor,
+        transform  = transformations)
+
+    
     model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
         config["train"]["encoder"], 
         config["train"]["decoder"]
         )
     
+    model.config.decoder_start_token_id = tokenizer.cls_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
+    model.config.vocab_size = model.config.decoder.vocab_size
+    model.config.eos_token_id = tokenizer.sep_token_id
+    model.config.decoder_start_token_id = tokenizer.bos_token_id
+    model.config.max_length = 128
+    model.config.early_stopping = True
+    model.config.no_repeat_ngram_size = 3
+    model.config.length_penalty = 2.0
+    model.config.num_beams = 4
+
     training_args = Seq2SeqTrainingArguments(
         output_dir="VIT_large_gpt2",
         per_device_train_batch_size=config["train"]["train_batch_size"],
@@ -84,6 +106,18 @@ def main(config: DictConfig) -> None:
         overwrite_output_dir=True,
         save_total_limit=1
     )
+
+    trainer = Seq2SeqTrainer(
+        tokenizer=tokenizer,
+        model=model,
+        args=training_args,
+        compute_metrics=compute_metrics,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+        data_collator=default_data_collator,
+    )
+
+    trainer.train()
 
 if __name__ == "__main__":
     main()
