@@ -18,7 +18,7 @@ from torchvision import io, transforms
 from torch.utils.data import Dataset, DataLoader, random_split
 
 from transformers import Seq2SeqTrainer ,Seq2SeqTrainingArguments
-from transformers import VisionEncoderDecoderModel , ViTImageProcessor
+from transformers import VisionEncoderDecoderModel , ViTImageProcessor, AutoModel
 from transformers import AutoTokenizer ,  GPT2Config , default_data_collator
 
 from sartor.modules.dataset import ImgDataset
@@ -92,7 +92,7 @@ def main(config: DictConfig) -> None:
     model.config.num_beams = 4
 
     training_args = Seq2SeqTrainingArguments(
-        output_dir="VIT_large_gpt2",
+        output_dir=config["train"]["output_model"],
         per_device_train_batch_size=config["train"]["train_batch_size"],
         per_device_eval_batch_size=config["train"]["val_batch_size"],
         predict_with_generate=True,

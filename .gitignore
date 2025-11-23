@@ -1,6 +1,8 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 outputs/
+VIT_large_gpt2/
+sartor-1/
 *.py[cod]
 *$py.class
 

@@ -1,5 +1,6 @@
 import torch
 import os
+import numpy as np
 from torch.utils.data import Dataset
 from PIL import Image
 
@@ -17,15 +18,20 @@ class ImgDataset(Dataset):
         return len(self.df)
     
     def __getitem__(self, idx):
-        caption = self.df.caption.iloc[idx]
-        image = self.df.image.iloc[idx]
+        caption = self.df["Caption"].iloc[idx]
+        image = self.df["Image Name"].iloc[idx]
         img_path = os.path.join(self.root_dir, image)
         img = Image.open(img_path).convert("RGB")
 
         if self.transform is not None:
             img = self.transform(img)
-        
-        pixel_values = self.feauture_extractor(img, return_tensors='pt').pixel_values
+            img = torch.from_numpy(np.array(img)).float()
+            img = (img + 1.0) / 2.0
+
+        pixel_values = self.feature_extractor(
+            images=img, 
+            return_tensors='pt',
+            do_normalize=True).pixel_values
 
         captions = self.tokenizer(caption, 
                                   padding='max_length',

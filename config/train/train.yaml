@@ -1,5 +1,6 @@
-encoder: "google/vit-base-patch16-224"
+encoder: "microsoft/swin-base-patch4-window7-224"
 decoder: "gpt2"
+output_model: "../../models/sartor-1"
 
 train_pct: 0.95
 train_batch_size: 8

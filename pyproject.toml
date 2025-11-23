@@ -19,6 +19,7 @@ torch = "^2.9.1"
 torchvision = "^0.24.1"
 transformers = "^4.57.1"
 accelerate = "^1.11.0"
+fire = "^0.7.1"
 
 
 [build-system]
