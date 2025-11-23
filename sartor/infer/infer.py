@@ -61,7 +61,6 @@ def main(checkpoint_name: str) -> None:
     )
 
     print("Prediction started ...")
-    test_predictions = trainer.predict(test_dataset=test_dataset)
 
     test_results = trainer.predict(test_dataset)
     predictions = test_results.predictions
