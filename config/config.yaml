@@ -1,4 +1,3 @@
 defaults:
   - pretrain: pretrain
-  - fine-tune: fine-tune
-  
+  - fine_tune: fine_tune

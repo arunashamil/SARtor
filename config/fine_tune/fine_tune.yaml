@@ -25,5 +25,5 @@ label_mask: -100
 top_k: 1000
 top_p: 0.95
 
-caps_dir: "../../data/fine-tune/Text/Caption/train/Caption_train.csv"
-imgs_dir: "../../data/fine-tune/SARimages_preprocessed/SARimages"
+caps_dir: "../../data/fine_tune/Text/Caption/train/Caption_train.csv"
+imgs_dir: "../../data/fine_tune/SARimages_preprocessed/SARimages"
