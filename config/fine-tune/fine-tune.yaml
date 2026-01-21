@@ -1,6 +1,6 @@
 encoder: "microsoft/swin-base-patch4-window7-224"
 decoder: "gpt2"
-output_model: "../../models/sartor-1"
+output_model: "../../models/sartor-finetuned"
 
 train_pct: 0.95
 train_batch_size: 8
@@ -25,5 +25,5 @@ label_mask: -100
 top_k: 1000
 top_p: 0.95
 
-caps_dir: "../../data/Text/Caption/train/Caption_train.csv"
-imgs_dir: "../../data/SARimages_preprocessed/SARimages"
+caps_dir: "../../data/fine-tune/Text/Caption/train/Caption_train.csv"
+imgs_dir: "../../data/fine-tune/SARimages_preprocessed/SARimages"

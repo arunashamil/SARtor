@@ -1,2 +1,4 @@
 defaults:
-  - train: train
+  - pretrain: pretrain
+  - fine-tune: fine-tune
+  

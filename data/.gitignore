@@ -1,3 +1,2 @@
-/SARimages_preprocessed
-/Text
-*.zip
+/pretrain
+/fine-tune
