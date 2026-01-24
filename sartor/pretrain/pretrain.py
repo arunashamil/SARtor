@@ -81,44 +81,44 @@ def main(config: DictConfig) -> None:
         config["pretrain"]["decoder"]
         )
     
-    # model.config.decoder_start_token_id = tokenizer.cls_token_id
-    # model.config.pad_token_id = tokenizer.pad_token_id
-    # model.config.vocab_size = model.config.decoder.vocab_size
-    # model.config.eos_token_id = tokenizer.sep_token_id
-    # model.config.decoder_start_token_id = tokenizer.bos_token_id
-    # model.config.max_length = 128
-    # model.config.early_stopping = True
-    # model.config.no_repeat_ngram_size = 3
-    # model.config.length_penalty = 2.0
-    # model.config.num_beams = 4
+    model.config.decoder_start_token_id = tokenizer.cls_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
+    model.config.vocab_size = model.config.decoder.vocab_size
+    model.config.eos_token_id = tokenizer.sep_token_id
+    model.config.decoder_start_token_id = tokenizer.bos_token_id
+    model.config.max_length = 128
+    model.config.early_stopping = True
+    model.config.no_repeat_ngram_size = 3
+    model.config.length_penalty = 2.0
+    model.config.num_beams = 4
 
-    # training_args = Seq2SeqTrainingArguments(
-    #     output_dir=config["train"]["output_model"],
-    #     per_device_train_batch_size=config["train"]["train_batch_size"],
-    #     per_device_eval_batch_size=config["train"]["val_batch_size"],
-    #     predict_with_generate=True,
-    #     do_train=True,
-    #     do_eval=True,
-    #     logging_steps=config["train"]["logging_steps"],
-    #     save_steps=config["train"]["save_steps"],
-    #     warmup_steps=config["train"]["warmup_steps"],
-    #     learning_rate= config["train"]["lr"],
-    #     num_train_epochs=config["train"]["epochs"],
-    #     overwrite_output_dir=True,
-    #     save_total_limit=1
-    # )
+    training_args = Seq2SeqTrainingArguments(
+        output_dir=config["pretrain"]["output_model"],
+        per_device_train_batch_size=config["pretrain"]["train_batch_size"],
+        per_device_eval_batch_size=config["pretrain"]["val_batch_size"],
+        predict_with_generate=True,
+        do_train=True,
+        do_eval=True,
+        logging_steps=config["pretrain"]["logging_steps"],
+        save_steps=config["pretrain"]["save_steps"],
+        warmup_steps=config["pretrain"]["warmup_steps"],
+        learning_rate= config["pretrain"]["lr"],
+        num_train_epochs=config["pretrain"]["epochs"],
+        overwrite_output_dir=True,
+        save_total_limit=1
+    )
 
-    # trainer = Seq2SeqTrainer(
-    #     tokenizer=tokenizer,
-    #     model=model,
-    #     args=training_args,
-    #     compute_metrics=compute_metrics,
-    #     train_dataset=train_dataset,
-    #     eval_dataset=val_dataset,
-    #     data_collator=default_data_collator,
-    # )
+    trainer = Seq2SeqTrainer(
+        processing_class=tokenizer,
+        model=model,
+        args=training_args,
+        compute_metrics=compute_metrics,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+        data_collator=default_data_collator,
+    )
 
-    # trainer.train()
+    trainer.train()
 
 if __name__ == "__main__":
     main()
