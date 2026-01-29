@@ -29,13 +29,9 @@ from sartor.modules.utils import json2csv
 @hydra.main(version_base=None, config_path="../../config", config_name="config")
 def main(config: DictConfig) -> None:
     if torch.cuda.is_available():    
-
         device = torch.device("cuda")
-
         print('There are %d GPU(s) available.' % torch.cuda.device_count())
-
         print('We will use the GPU:', torch.cuda.get_device_name(0))
-
     else:
         print('No GPU available, using the CPU instead.')
         device = torch.device("cpu")
@@ -50,30 +46,33 @@ def main(config: DictConfig) -> None:
             transforms.Resize((config["pretrain"]["img_size"])),
             transforms.ToTensor(),
             transforms.Normalize(
-                mean=0.5,
-                std=0.5
+                mean=config["pretrain"]["mean"],
+                std=config["pretrain"]["std"]
             )
         ]
     )
     
     df = json2csv(config["pretrain"]["caps_dir"])
 
-    train_df, val_df = train_test_split(df)
+    train_df, val_df = train_test_split(df, 
+                                        test_size=1-config["pretrain"]["train_pct"], 
+                                        random_state=config["pretrain"]["seed"])
 
     train_dataset = ImgDataset(
         train_df, 
         root_dir=config["pretrain"]["imgs_dir"],
         tokenizer=tokenizer,
         feature_extractor=feature_extractor,
-        transform=transformations
+        max_length=config["pretrain"]["max_length"],
         )
     
     val_dataset = ImgDataset(
-        val_df , 
+        val_df, 
         root_dir = config["pretrain"]["imgs_dir"],
         tokenizer=tokenizer,
         feature_extractor = feature_extractor,
-        transform  = transformations)
+        max_length=config["pretrain"]["max_length"],
+        )
 
     
     model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
@@ -81,11 +80,13 @@ def main(config: DictConfig) -> None:
         config["pretrain"]["decoder"]
         )
     
-    model.config.decoder_start_token_id = tokenizer.cls_token_id
-    model.config.pad_token_id = tokenizer.pad_token_id
-    model.config.vocab_size = model.config.decoder.vocab_size
-    model.config.eos_token_id = tokenizer.sep_token_id
+    tokenizer.pad_token = tokenizer.eos_token
+
     model.config.decoder_start_token_id = tokenizer.bos_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
+    model.config.eos_token_id = tokenizer.eos_token_id
+
+    model.config.vocab_size = model.config.decoder.vocab_size    
     model.config.max_length = 128
     model.config.early_stopping = True
     model.config.no_repeat_ngram_size = 3
@@ -105,11 +106,13 @@ def main(config: DictConfig) -> None:
         learning_rate= config["pretrain"]["lr"],
         num_train_epochs=config["pretrain"]["epochs"],
         overwrite_output_dir=True,
-        save_total_limit=1
+        save_total_limit=1,
+        fp16=True,
+        optim="adamw_8bit",
     )
 
     trainer = Seq2SeqTrainer(
-        processing_class=tokenizer,
+        tokenizer=tokenizer,
         model=model,
         args=training_args,
         compute_metrics=compute_metrics,
@@ -118,7 +121,8 @@ def main(config: DictConfig) -> None:
         data_collator=default_data_collator,
     )
 
-    trainer.train()
+    # trainer.train()
+    
 
 if __name__ == "__main__":
     main()
