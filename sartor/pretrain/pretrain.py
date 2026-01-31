@@ -1,25 +1,15 @@
 import hydra
 from omegaconf import DictConfig
 
-import datasets
-import numpy as np
-import pandas as pd
-from PIL import Image
-from pathlib import Path
-from tqdm.auto import tqdm
 import multiprocessing as mp
-import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torchvision import io, transforms
-from torch.utils.data import Dataset, DataLoader, random_split
 
-from transformers import Seq2SeqTrainer ,Seq2SeqTrainingArguments
-from transformers import VisionEncoderDecoderModel , ViTImageProcessor, AutoModel
-from transformers import AutoTokenizer ,  GPT2Config , default_data_collator
+from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
+from transformers import VisionEncoderDecoderModel, AutoImageProcessor
+
+from transformers import AutoTokenizer, default_data_collator
 
 from sartor.modules.dataset import ImgDataset
 from sartor.modules.compute_metrics import compute_metrics
@@ -37,26 +27,16 @@ def main(config: DictConfig) -> None:
         device = torch.device("cpu")
 
     num_workers = mp.cpu_count()
-    feature_extractor = ViTImageProcessor.from_pretrained(config["pretrain"]["encoder"])
+    feature_extractor = AutoImageProcessor.from_pretrained(config["pretrain"]["encoder"])
     tokenizer = AutoTokenizer.from_pretrained(config["pretrain"]["decoder"])
-    tokenizer.pad_token = tokenizer.unk_token
-
-    transformations = transforms.Compose(
-        [
-            transforms.Resize((config["pretrain"]["img_size"])),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=config["pretrain"]["mean"],
-                std=config["pretrain"]["std"]
-            )
-        ]
-    )
     
     df = json2csv(config["pretrain"]["caps_dir"])
 
-    train_df, val_df = train_test_split(df, 
-                                        test_size=1-config["pretrain"]["train_pct"], 
-                                        random_state=config["pretrain"]["seed"])
+    train_df, val_df = train_test_split(
+        df, 
+        train_size=config["pretrain"]["train_pct"], 
+        random_state=config["pretrain"]["seed"]
+        )
 
     train_dataset = ImgDataset(
         train_df, 
@@ -100,6 +80,8 @@ def main(config: DictConfig) -> None:
         predict_with_generate=True,
         do_train=True,
         do_eval=True,
+        save_strategy="steps",
+        logging_strategy="steps",
         logging_steps=config["pretrain"]["logging_steps"],
         save_steps=config["pretrain"]["save_steps"],
         warmup_steps=config["pretrain"]["warmup_steps"],
@@ -112,7 +94,7 @@ def main(config: DictConfig) -> None:
     )
 
     trainer = Seq2SeqTrainer(
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         model=model,
         args=training_args,
         compute_metrics=compute_metrics,
@@ -121,7 +103,10 @@ def main(config: DictConfig) -> None:
         data_collator=default_data_collator,
     )
 
-    # trainer.train()
+    trainer.train()
+    trainer.save_model()
+    feature_extractor.save_pretrained(training_args.output_dir)
+    tokenizer.save_pretrained(training_args.output_dir)
     
 
 if __name__ == "__main__":

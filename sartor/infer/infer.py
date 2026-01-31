@@ -20,14 +20,10 @@ def main(max_new_tokens: int = 64, num_beams: int = 4) -> None:
 
     test_df = pd.read_csv(CAPS_DIR)
     test_df.columns = [col.strip() for col in test_df.columns]
-
     tokenizer = AutoTokenizer.from_pretrained(DECODER)
     tokenizer.pad_token = tokenizer.eos_token  # GPT-2 captioning standard
-    
-    feature_extractor = ViTImageProcessor.from_pretrained(f"{MODELS_PATH}")
 
     model = VisionEncoderDecoderModel.from_pretrained(f"{MODELS_PATH}").to(device).eval()
-
     print("Successfully loaded fine-tuned model and test dataset")
 
     processor = AutoImageProcessor.from_pretrained(ENCODER)
@@ -36,10 +32,19 @@ def main(max_new_tokens: int = 64, num_beams: int = 4) -> None:
 
     for i, row in test_df.iterrows():
         img_path = f"{IMGS_DIR}/{row["Image Name"]}"
-        pred = generate(model, processor, tokenizer, img_path, device,
-                           max_new_tokens=max_new_tokens,
-                           num_beams=num_beams)
-        print(f"{i:05d}  {row['Image Name']}  ->  {pred}")
+        prompt = "The image shows " # row["Prompt"]
+        pred = generate(
+            model,
+            processor, 
+            tokenizer, 
+            img_path,
+            prompt,
+            device,
+            max_new_tokens=max_new_tokens,
+            num_beams=num_beams
+            )
+        
+        print(f"{i:05d}  {row["Image Name"]}  ->  {pred}")
 
 
 if __name__ == "__main__":

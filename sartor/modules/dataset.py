@@ -6,7 +6,7 @@ from PIL import Image
 
 
 class ImgDataset(Dataset):
-    def __init__(self, df, root_dir, tokenizer, feature_extractor, max_length=50, transform=None):
+    def __init__(self, df, root_dir, tokenizer, feature_extractor, max_length, transform=None):
         self.df = df
         self.transform = transform
         self.root_dir = root_dir
@@ -18,27 +18,31 @@ class ImgDataset(Dataset):
         return len(self.df)
     
     def __getitem__(self, idx):
-        caption = self.df["Caption"].iloc[idx]
         image = self.df["Image Name"].iloc[idx]
         img_path = os.path.join(self.root_dir, image)
         img = Image.open(img_path).convert("RGB")
 
-        if self.transform is not None:
-            img = self.transform(img)
-            img = torch.from_numpy(np.array(img)).float()
-            img = (img + 1.0) / 2.0
+        caption = self.df["Caption"].iloc[idx].strip()
+        caption_ids = self.tokenizer(caption, add_special_tokens=False)["input_ids"]
 
         pixel_values = self.feature_extractor(
             images=img, 
             return_tensors='pt',
-            do_normalize=True).pixel_values
+            do_normalize=True
+            ).pixel_values[0] # single image is passed
 
-        captions = self.tokenizer(caption, 
-                                  padding='max_length',
-                                  max_length=self.max_length).input_ids
-        
-        captions = [caption if caption != self.tokenizer.pad_token_id else -100 for caption in captions]
+        input_ids = caption_ids + [self.tokenizer.eos_token_id]
+        attention_mask = [1] * len(input_ids)
 
-        encoding = {'pixel_values': pixel_values.squeeze(), 'labels': torch.tensor(captions)}
+        labels = caption_ids + [self.tokenizer.eos_token_id]
 
-        return encoding
+        pad_len = self.max_length - len(input_ids)
+        input_ids += [self.tokenizer.pad_token_id] * pad_len
+        attention_mask += [0] * pad_len
+        labels += [-100] * pad_len
+
+        return {
+            "pixel_values": pixel_values,
+            "labels": torch.tensor(labels, dtype=torch.long),
+            "decoder_attention_mask": torch.tensor(attention_mask, dtype=torch.long),
+        }

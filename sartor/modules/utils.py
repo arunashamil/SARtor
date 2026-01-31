@@ -7,8 +7,6 @@ def json2csv(input):
     
     rows = []
     for item in data["images"]:
-        rows.append(item["sentences"][0]["raw"])
+        rows.append([item["filename"], item["sentences"][0]["raw"]])
 
-    return(pd.DataFrame(rows))
-
-    
+    return(pd.DataFrame(rows, columns=["Image Name", "Caption"]))

@@ -1,18 +1,21 @@
-import datasets
+import numpy as np
+import evaluate
 
-def compute_metrics(rouge, pred, tokenizer):
-    rouge = datasets.load_metric("rouge")
-    labels_ids = pred.label_ids
-    pred_ids = pred.predictions
+rouge = evaluate.load("rouge")
 
-    pred_str = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
-    labels_ids[labels_ids == -100] = tokenizer.pad_token_id
-    label_str = tokenizer.batch_decode(labels_ids, skip_special_tokens=True)
+def compute_metrics(eval_pred, tokenizer):
+    preds, labels = eval_pred
 
-    rouge_output = rouge.compute(predictions=pred_str, references=label_str, rouge_types=["rouge2"]["rouge2"]).mid
+    if isinstance(preds, tuple):
+        preds = preds[0]
+    if preds.ndim == 3:
+        preds = np.argmax(preds, axis=-1)
 
-    return {
-        "rouge2_precision": round(rouge_output.precision, 4),
-        "rouge2_recall": round(rouge_output.recall, 4),
-        "rouge2_fmeasure": round(rouge_output.fmeasure, 4),
-    }
+    pred_str = tokenizer.batch_decode(preds, skip_special_tokens=True)
+
+    labels = labels.copy()
+    labels[labels == -100] = tokenizer.pad_token_id
+    label_str = tokenizer.batch_decode(labels, skip_special_tokens=True)
+
+    scores = rouge.compute(predictions=pred_str, references=label_str, rouge_types=["rouge2"])
+    return {"rouge2": float(scores["rouge2"])}
