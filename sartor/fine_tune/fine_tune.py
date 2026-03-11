@@ -1,6 +1,8 @@
+import os
 import hydra
 from omegaconf import DictConfig
 
+import multiprocessing as mp
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -26,12 +28,19 @@ def main(config: DictConfig) -> None:
         print('No GPU available, using the CPU instead.')
         device = torch.device("cpu")
 
-    feature_extractor = AutoImageProcessor.from_pretrained(config["pretrain"]["encoder"], use_fast=False)
-    
-    tokenizer = AutoTokenizer.from_pretrained(config["pretrain"]["decoder"])
-    tokenizer.pad_token = tokenizer.eos_token
+    num_workers = min(mp.cpu_count(), 8)
+    orig_cwd = hydra.utils.get_original_cwd()
 
-    df = pd.read_csv(config["fine_tune"]["caps_dir"])
+    caps_dir = os.path.join(orig_cwd, config["fine_tune"]["caps_dir"])
+    imgs_dir = os.path.join(orig_cwd, config["fine_tune"]["imgs_dir"])
+    output_model = os.path.join(orig_cwd, config["fine_tune"]["output_model"])
+    pretrained_model = os.path.join(orig_cwd, config["pretrain"]["output_model"])
+
+    feature_extractor = AutoImageProcessor.from_pretrained(config["pretrain"]["encoder"], use_fast=False)
+
+    tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
+
+    df = pd.read_csv(caps_dir)
     df.columns = [col.strip() for col in df.columns]
     
     train_df, val_df = train_test_split(
@@ -41,7 +50,7 @@ def main(config: DictConfig) -> None:
 
     train_dataset = ImgDataset(
         train_df, 
-        root_dir=config["fine_tune"]["imgs_dir"],
+        root_dir=imgs_dir,
         tokenizer=tokenizer,
         feature_extractor=feature_extractor,
         max_length=config["fine_tune"]["max_length"],
@@ -49,13 +58,13 @@ def main(config: DictConfig) -> None:
     
     val_dataset = ImgDataset(
         val_df, 
-        root_dir = config["fine_tune"]["imgs_dir"],
+        root_dir = imgs_dir,
         tokenizer=tokenizer,
         feature_extractor = feature_extractor,
         max_length=config["fine_tune"]["max_length"],
         )
 
-    model = VisionEncoderDecoderModel.from_pretrained(config["pretrain"]["output_model"])
+    model = VisionEncoderDecoderModel.from_pretrained(pretrained_model)
     model.config.eos_token_id = tokenizer.eos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
     model.config.decoder_start_token_id = tokenizer.eos_token_id
@@ -74,7 +83,7 @@ def main(config: DictConfig) -> None:
     gen.length_penalty = 1.2
 
     training_args = Seq2SeqTrainingArguments(
-        output_dir=config["fine_tune"]["output_model"],
+        output_dir=output_model,
         per_device_train_batch_size=config["fine_tune"]["train_batch_size"],
         per_device_eval_batch_size=config["fine_tune"]["val_batch_size"],
         predict_with_generate=True,
@@ -91,10 +100,14 @@ def main(config: DictConfig) -> None:
         save_steps=config["fine_tune"]["save_steps"],
         warmup_steps=config["fine_tune"]["warmup_steps"],
         learning_rate= config["fine_tune"]["lr"],
+        weight_decay=config["fine_tune"]["weight_decay"],
         num_train_epochs=config["fine_tune"]["epochs"],
+        dataloader_num_workers=num_workers,
         load_best_model_at_end=True,
         overwrite_output_dir=True,
         save_total_limit=1,
+        fp16=True,
+        optim="adamw_8bit",
     )
 
     trainer = Seq2SeqTrainer(

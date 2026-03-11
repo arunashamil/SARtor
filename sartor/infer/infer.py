@@ -1,11 +1,8 @@
 import fire
 import torch
 import pandas as pd
-import numpy as np
-from transformers import AutoTokenizer, VisionEncoderDecoderModel, ViTImageProcessor, AutoImageProcessor, default_data_collator
-from sartor.modules.constants import MODELS_PATH, CAPS_DIR, IMGS_DIR, IMG_SIZE, ENCODER, DECODER, MAX_LENGTH
-from sartor.modules.dataset import ImgDataset
-from sartor.modules.compute_metrics import compute_metrics
+from transformers import AutoTokenizer, VisionEncoderDecoderModel, AutoImageProcessor
+from sartor.modules.constants import MODELS_PATH, CAPS_DIR, IMGS_DIR, ENCODER, DECODER
 from sartor.modules.generate import generate
 
 def main(max_new_tokens: int = 64, num_beams: int = 4) -> None:
@@ -20,10 +17,9 @@ def main(max_new_tokens: int = 64, num_beams: int = 4) -> None:
 
     test_df = pd.read_csv(CAPS_DIR)
     test_df.columns = [col.strip() for col in test_df.columns]
-    tokenizer = AutoTokenizer.from_pretrained(DECODER)
-    tokenizer.pad_token = tokenizer.eos_token  # GPT-2 captioning standard
+    tokenizer = AutoTokenizer.from_pretrained(MODELS_PATH)
 
-    model = VisionEncoderDecoderModel.from_pretrained(f"{MODELS_PATH}").to(device).eval()
+    model = VisionEncoderDecoderModel.from_pretrained(MODELS_PATH).to(device).eval()
     print("Successfully loaded fine-tuned model and test dataset")
 
     processor = AutoImageProcessor.from_pretrained(ENCODER)
@@ -32,18 +28,16 @@ def main(max_new_tokens: int = 64, num_beams: int = 4) -> None:
 
     for i, row in test_df.iterrows():
         img_path = f"{IMGS_DIR}/{row["Image Name"]}"
-        prompt = "The image shows " # row["Prompt"]
         pred = generate(
             model,
-            processor, 
-            tokenizer, 
+            processor,
+            tokenizer,
             img_path,
-            prompt,
             device,
             max_new_tokens=max_new_tokens,
             num_beams=num_beams
             )
-        
+
         print(f"{i:05d}  {row["Image Name"]}  ->  {pred}")
 
 

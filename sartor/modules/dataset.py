@@ -24,6 +24,7 @@ class ImgDataset(Dataset):
 
         caption = self.df["Caption"].iloc[idx].strip()
         caption_ids = self.tokenizer(caption, add_special_tokens=False)["input_ids"]
+        caption_ids = caption_ids[:self.max_length - 1]
 
         pixel_values = self.feature_extractor(
             images=img, 

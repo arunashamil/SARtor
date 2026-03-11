@@ -11,6 +11,8 @@ def compute_metrics(eval_pred, tokenizer):
     if preds.ndim == 3:
         preds = np.argmax(preds, axis=-1)
 
+    preds = preds.copy()
+    preds[preds == -100] = tokenizer.pad_token_id
     pred_str = tokenizer.batch_decode(preds, skip_special_tokens=True)
 
     labels = labels.copy()
