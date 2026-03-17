@@ -6,29 +6,23 @@ output_model: "models/sartor-finetuned"
 train_pct: 0.95
 train_batch_size: 8
 val_batch_size: 8
-val_epochs: 1
-
-lr: 1e-5
+lr: 5e-6
 seed: 42
+grad_accum_steps: 4
 
 logging_steps: 2048
-save_steps: 2048 
+save_steps: 2048
 warmup_steps: 256
 
 eval_strategy: "steps"
 eval_steps: 2048
 
 max_length: 128
-summary_len: 20
 weight_decay: 0.01
 
 epochs: 10
-img_size: [224, 224]
-label_mask: -100
-top_k: 1000
-top_p: 0.95
 
-label_smoothing_factor: 0.0
+label_smoothing_factor: 0.1
 
 caps_dir: "data/fine_tune/Text/Caption/train/Caption_train.csv"
 imgs_dir: "data/fine_tune/SARimages_preprocessed/SARimages"

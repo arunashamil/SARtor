@@ -2,7 +2,7 @@ import fire
 import torch
 import pandas as pd
 from transformers import AutoTokenizer, VisionEncoderDecoderModel, AutoImageProcessor
-from sartor.modules.constants import MODELS_PATH, CAPS_DIR, IMGS_DIR, ENCODER, DECODER
+from sartor.modules.constants import MODELS_PATH, CAPS_DIR, IMGS_DIR
 from sartor.modules.generate import generate
 
 def main(max_new_tokens: int = 64, num_beams: int = 4) -> None:
@@ -22,12 +22,12 @@ def main(max_new_tokens: int = 64, num_beams: int = 4) -> None:
     model = VisionEncoderDecoderModel.from_pretrained(MODELS_PATH).to(device).eval()
     print("Successfully loaded fine-tuned model and test dataset")
 
-    processor = AutoImageProcessor.from_pretrained(ENCODER)
+    processor = AutoImageProcessor.from_pretrained(MODELS_PATH)
 
     print("Prediction started ...")
 
     for i, row in test_df.iterrows():
-        img_path = f"{IMGS_DIR}/{row["Image Name"]}"
+        img_path = f"{IMGS_DIR}/{row['Image Name']}"
         pred = generate(
             model,
             processor,
@@ -38,7 +38,9 @@ def main(max_new_tokens: int = 64, num_beams: int = 4) -> None:
             num_beams=num_beams
             )
 
-        print(f"{i:05d}  {row["Image Name"]}  ->  {pred}")
+        print(f"{i:05d}  {row['Image Name']}")
+        print(f"       TRUE: {row['Caption']}")
+        print(f"       PRED: {pred}\n")
 
 
 if __name__ == "__main__":

@@ -68,11 +68,15 @@ def main(config: DictConfig) -> None:
         config["pretrain"]["decoder"]
         )
 
+    tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+    model.decoder.resize_token_embeddings(len(tokenizer))
+
     for param in model.encoder.parameters():
         param.requires_grad = False
 
-    tokenizer.add_special_tokens({"pad_token": "[PAD]"})
-    model.decoder.resize_token_embeddings(len(tokenizer))
+    for name, param in model.decoder.named_parameters():
+        if "crossattention" not in name and "ln_cross_attn" not in name:
+            param.requires_grad = False
 
     model.config.decoder_start_token_id = tokenizer.bos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
@@ -108,6 +112,9 @@ def main(config: DictConfig) -> None:
         weight_decay=config["pretrain"]["weight_decay"],
         num_train_epochs=config["pretrain"]["epochs"],
         dataloader_num_workers=num_workers,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
+        load_best_model_at_end=True,
         overwrite_output_dir=True,
         save_total_limit=1,
         fp16=True,

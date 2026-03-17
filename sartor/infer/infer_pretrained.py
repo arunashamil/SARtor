@@ -4,18 +4,20 @@ import fire
 import torch
 import pandas as pd
 import matplotlib
-matplotlib.use("GTK3Agg")
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from PIL import Image
 from transformers import AutoTokenizer, VisionEncoderDecoderModel, AutoImageProcessor
 from sartor.modules.generate import generate
 from sartor.modules.utils import json2csv
 
-MODELS_PATH = "../../models/sartor-pretrained"
-CAPS_DIR = "../../data/pretrain/dataset_rsicd.json"
-IMGS_DIR = "../../data/pretrain/RSICD_images"
-ENCODER = "microsoft/swin-base-patch4-window7-224"
-DECODER = "gpt2"
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+MODELS_PATH = str(PROJECT_ROOT / "models" / "sartor-pretrained")
+CAPS_DIR = str(PROJECT_ROOT / "data" / "pretrain" / "dataset_rsicd.json")
+IMGS_DIR = str(PROJECT_ROOT / "data" / "pretrain" / "RSICD_images")
 
 COLS = 4
 

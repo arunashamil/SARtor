@@ -36,7 +36,7 @@ def main(config: DictConfig) -> None:
     output_model = os.path.join(orig_cwd, config["fine_tune"]["output_model"])
     pretrained_model = os.path.join(orig_cwd, config["pretrain"]["output_model"])
 
-    feature_extractor = AutoImageProcessor.from_pretrained(config["pretrain"]["encoder"], use_fast=False)
+    feature_extractor = AutoImageProcessor.from_pretrained(pretrained_model, use_fast=False)
 
     tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
 
@@ -65,15 +65,23 @@ def main(config: DictConfig) -> None:
         )
 
     model = VisionEncoderDecoderModel.from_pretrained(pretrained_model)
+
+    for param in model.encoder.parameters():
+        param.requires_grad = False
+
+    for name, param in model.decoder.named_parameters():
+        if "crossattention" not in name and "ln_cross_attn" not in name:
+            param.requires_grad = False
+
     model.config.eos_token_id = tokenizer.eos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
-    model.config.decoder_start_token_id = tokenizer.eos_token_id
+    model.config.decoder_start_token_id = tokenizer.bos_token_id
 
     gen = model.generation_config
-    
+
     gen.eos_token_id = tokenizer.eos_token_id
     gen.pad_token_id = tokenizer.pad_token_id
-    gen.decoder_start_token_id = tokenizer.eos_token_id
+    gen.decoder_start_token_id = tokenizer.bos_token_id
 
     gen.max_new_tokens = 60
     gen.min_new_tokens = 12
@@ -99,7 +107,8 @@ def main(config: DictConfig) -> None:
         logging_steps=config["fine_tune"]["logging_steps"],
         save_steps=config["fine_tune"]["save_steps"],
         warmup_steps=config["fine_tune"]["warmup_steps"],
-        learning_rate= config["fine_tune"]["lr"],
+        gradient_accumulation_steps=config["fine_tune"]["grad_accum_steps"],
+        learning_rate=config["fine_tune"]["lr"],
         weight_decay=config["fine_tune"]["weight_decay"],
         num_train_epochs=config["fine_tune"]["epochs"],
         dataloader_num_workers=num_workers,
