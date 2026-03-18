@@ -24,5 +24,8 @@ epochs: 10
 
 label_smoothing_factor: 0.1
 
+decoder_frozen_layers: 8
+encoder_frozen_stages: 4
+
 caps_dir: "data/fine_tune/Text/Caption/train/Caption_train.csv"
 imgs_dir: "data/fine_tune/SARimages_preprocessed/SARimages"

@@ -23,19 +23,22 @@ class ImgDataset(Dataset):
 
         caption = self.df["Caption"].iloc[idx].strip()
         caption_ids = self.tokenizer(caption, add_special_tokens=False)["input_ids"]
-        caption_ids = caption_ids[:self.max_length - 1]
+        caption_ids = caption_ids[:self.max_length - 2]
 
         pixel_values = self.feature_extractor(
-            images=img, 
+            images=img,
             return_tensors='pt',
             do_normalize=True
             ).pixel_values[0] # single image is passed
 
-        labels = caption_ids + [self.tokenizer.eos_token_id]
-        pad_len = self.max_length - len(labels)
-        labels += [-100] * pad_len
+        seq = [self.tokenizer.bos_token_id] + caption_ids + [self.tokenizer.eos_token_id]
+        pad_len = self.max_length - len(seq)
+
+        labels = seq + [-100] * pad_len
+        decoder_input_ids = seq + [self.tokenizer.pad_token_id] * pad_len
 
         return {
             "pixel_values": pixel_values,
             "labels": torch.tensor(labels, dtype=torch.long),
+            "decoder_input_ids": torch.tensor(decoder_input_ids, dtype=torch.long),
         }

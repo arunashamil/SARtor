@@ -66,11 +66,21 @@ def main(config: DictConfig) -> None:
 
     model = VisionEncoderDecoderModel.from_pretrained(pretrained_model)
 
-    for param in model.encoder.parameters():
-        param.requires_grad = False
+    encoder_frozen_stages = config["fine_tune"]["encoder_frozen_stages"]
+    frozen_encoder_prefixes = (
+        tuple(f"encoder.layers.{i}." for i in range(encoder_frozen_stages))
+        + ("embeddings.",)
+    )
+
+    for name, param in model.encoder.named_parameters():
+        if name.startswith(frozen_encoder_prefixes):
+            param.requires_grad = False
+
+    frozen_layers = config["fine_tune"]["decoder_frozen_layers"]
+    frozen_prefixes = tuple(f"transformer.h.{i}." for i in range(frozen_layers))
 
     for name, param in model.decoder.named_parameters():
-        if "crossattention" not in name and "ln_cross_attn" not in name:
+        if name.startswith(frozen_prefixes) or "wte" in name or "wpe" in name:
             param.requires_grad = False
 
     model.config.eos_token_id = tokenizer.eos_token_id
