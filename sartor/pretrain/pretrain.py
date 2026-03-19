@@ -7,6 +7,7 @@ import multiprocessing as mp
 from sklearn.model_selection import train_test_split
 
 import torch
+import torch.nn.functional as F
 
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
 from transformers import VisionEncoderDecoderModel, AutoImageProcessor
@@ -77,6 +78,11 @@ def main(config: DictConfig) -> None:
     for name, param in model.decoder.named_parameters():
         if "crossattention" not in name and "ln_cross_attn" not in name:
             param.requires_grad = False
+
+    def unshifted_loss(logits, labels, vocab_size, **kwargs):
+        return F.cross_entropy(logits.float().view(-1, vocab_size), labels.view(-1), ignore_index=-100)
+
+    model.loss_function = unshifted_loss
 
     model.config.decoder_start_token_id = tokenizer.bos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id

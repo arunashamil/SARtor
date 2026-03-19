@@ -7,6 +7,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 import torch
+import torch.nn.functional as F
 import functools
 
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
@@ -17,9 +18,43 @@ from sartor.modules.dataset import ImgDataset
 from sartor.modules.compute_metrics import compute_metrics
 
 
+class SARTrainer(Seq2SeqTrainer):
+    def __init__(self, encoder_lr, *args, **kwargs):
+        self.encoder_lr = encoder_lr
+        super().__init__(*args, **kwargs)
+
+    def create_optimizer(self):
+        if self.optimizer is not None:
+            return self.optimizer
+
+        encoder_params = []
+        decoder_params = []
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if name.startswith("encoder"):
+                encoder_params.append(param)
+            else:
+                decoder_params.append(param)
+
+        optimizer_cls, optimizer_kwargs = Seq2SeqTrainer.get_optimizer_cls_and_kwargs(
+            self.args, self.model
+        )
+        base_lr = optimizer_kwargs.pop("lr", self.args.learning_rate)
+
+        self.optimizer = optimizer_cls(
+            [
+                {"params": encoder_params, "lr": self.encoder_lr},
+                {"params": decoder_params, "lr": base_lr},
+            ],
+            **optimizer_kwargs,
+        )
+        return self.optimizer
+
+
 @hydra.main(version_base=None, config_path="../../config", config_name="config")
 def main(config: DictConfig) -> None:
-    if torch.cuda.is_available():    
+    if torch.cuda.is_available():
         device = torch.device("cuda")
         print('There are %d GPU(s) available.' % torch.cuda.device_count())
         print('We will use the GPU:', torch.cuda.get_device_name(0))
@@ -42,22 +77,22 @@ def main(config: DictConfig) -> None:
 
     df = pd.read_csv(caps_dir)
     df.columns = [col.strip() for col in df.columns]
-    
+
     train_df, val_df = train_test_split(
         df,
         train_size=config["fine_tune"]["train_pct"],
         random_state=config["fine_tune"]["seed"])
 
     train_dataset = ImgDataset(
-        train_df, 
+        train_df,
         root_dir=imgs_dir,
         tokenizer=tokenizer,
         feature_extractor=feature_extractor,
         max_length=config["fine_tune"]["max_length"],
         )
-    
+
     val_dataset = ImgDataset(
-        val_df, 
+        val_df,
         root_dir = imgs_dir,
         tokenizer=tokenizer,
         feature_extractor = feature_extractor,
@@ -66,6 +101,7 @@ def main(config: DictConfig) -> None:
 
     model = VisionEncoderDecoderModel.from_pretrained(pretrained_model)
 
+    # Freeze only early encoder stages — let later stages learn SAR features
     encoder_frozen_stages = config["fine_tune"]["encoder_frozen_stages"]
     frozen_encoder_prefixes = (
         tuple(f"encoder.layers.{i}." for i in range(encoder_frozen_stages))
@@ -76,12 +112,18 @@ def main(config: DictConfig) -> None:
         if name.startswith(frozen_encoder_prefixes):
             param.requires_grad = False
 
+    # Freeze early decoder layers, keep wte unfrozen (tied to lm_head)
     frozen_layers = config["fine_tune"]["decoder_frozen_layers"]
     frozen_prefixes = tuple(f"transformer.h.{i}." for i in range(frozen_layers))
 
     for name, param in model.decoder.named_parameters():
-        if name.startswith(frozen_prefixes) or "wte" in name or "wpe" in name:
+        if name.startswith(frozen_prefixes) or "wpe" in name:
             param.requires_grad = False
+
+    def unshifted_loss(logits, labels, vocab_size, **kwargs):
+        return F.cross_entropy(logits.float().view(-1, vocab_size), labels.view(-1), ignore_index=-100)
+
+    model.loss_function = unshifted_loss
 
     model.config.eos_token_id = tokenizer.eos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
@@ -105,7 +147,6 @@ def main(config: DictConfig) -> None:
         per_device_train_batch_size=config["fine_tune"]["train_batch_size"],
         per_device_eval_batch_size=config["fine_tune"]["val_batch_size"],
         predict_with_generate=True,
-        label_smoothing_factor = config["fine_tune"]["label_smoothing_factor"],
         do_train=True,
         do_eval=True,
         save_strategy="steps",
@@ -127,9 +168,11 @@ def main(config: DictConfig) -> None:
         save_total_limit=1,
         fp16=True,
         optim="adamw_8bit",
+        label_smoothing_factor=config["fine_tune"]["label_smoothing_factor"],
     )
 
-    trainer = Seq2SeqTrainer(
+    trainer = SARTrainer(
+        encoder_lr=config["fine_tune"]["encoder_lr"],
         processing_class=tokenizer,
         model=model,
         args=training_args,
