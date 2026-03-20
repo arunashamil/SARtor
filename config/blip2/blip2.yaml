@@ -1,0 +1,53 @@
+model: "Salesforce/blip2-flan-t5-xl"
+
+output_pretrained: "models/blip2-pretrained"
+output_finetuned: "models/blip2-finetuned"
+
+# Training
+train_pct: 0.95
+train_batch_size: 4
+val_batch_size: 4
+seed: 42
+grad_accum_steps: 8
+
+# Pretrain (RSICD captioning)
+pretrain_lr: 1e-5
+pretrain_epochs: 5
+pretrain_warmup_steps: 500
+
+# Fine-tune (SAR captioning + VQA)
+ft_lr: 1e-5
+ft_vision_lr: 1e-7
+ft_epochs: 10
+ft_warmup_steps: 256
+unfreeze_vision_layers: 4
+
+# VQA data
+vqa_dataset: "SARVQA2"
+vqa_max_samples: 0
+
+# Text lengths
+max_input_length: 64
+max_target_length: 64
+
+# Logging and saving
+logging_steps: 128
+save_steps: 1024
+eval_strategy: "steps"
+eval_steps: 1024
+
+weight_decay: 0.01
+
+# Generation
+max_new_tokens: 64
+num_beams: 4
+
+# Data paths
+pretrain_caps: "data/pretrain/dataset_rsicd.json"
+pretrain_imgs: "data/pretrain/RSICD_images/"
+ft_caps: "data/fine_tune/Text/Caption/train/Caption_train.csv"
+ft_imgs: "data/fine_tune/SARimages_preprocessed/SARimages"
+ft_vqa_train: "data/fine_tune/Text/VQA/train"
+ft_vqa_test: "data/fine_tune/Text/VQA/test"
+test_caps: "data/fine_tune/Text/Caption/test/Caption_test.csv"
+test_imgs: "data/fine_tune/SARimages_preprocessed/SARimages"
