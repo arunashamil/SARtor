@@ -2,9 +2,7 @@
 __pycache__/
 outputs/
 VIT_large_gpt2/
-sartor-1/
-sartor-pretrained/
-sartor-finetuned/
+models/
 *.py[cod]
 *$py.class
 

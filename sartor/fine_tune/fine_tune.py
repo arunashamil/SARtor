@@ -78,6 +78,11 @@ def main(config: DictConfig) -> None:
     df = pd.read_csv(caps_dir)
     df.columns = [col.strip() for col in df.columns]
 
+    if "Caption Type" in df.columns:
+        df["Caption Type"] = df["Caption Type"].str.strip()
+        df = df[df["Caption Type"] == "complex caption"]
+        print(f"Filtered to complex captions: {len(df)} samples")
+
     train_df, val_df = train_test_split(
         df,
         train_size=config["fine_tune"]["train_pct"],
@@ -136,8 +141,10 @@ def main(config: DictConfig) -> None:
     gen.decoder_start_token_id = tokenizer.bos_token_id
 
     gen.max_new_tokens = 60
-    gen.min_new_tokens = 12
-    gen.num_beams = 4
+    gen.min_new_tokens = 8
+    gen.num_beams = 6
+    gen.num_beam_groups = 3
+    gen.diversity_penalty = 1.0
     gen.early_stopping = True
     gen.no_repeat_ngram_size = 3
     gen.length_penalty = 1.2
