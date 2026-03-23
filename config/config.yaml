@@ -1,4 +1,2 @@
 defaults:
-  - pretrain: pretrain
-  - fine_tune: fine_tune
   - blip2: blip2

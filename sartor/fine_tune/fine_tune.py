@@ -1,198 +1,227 @@
+"""Fine-tune BLIP-2 on SAR captioning + VQA with discriminative learning rates."""
+
 import os
+import functools
+import multiprocessing as mp
+
 import hydra
 from omegaconf import DictConfig
 
-import multiprocessing as mp
+import torch
 import pandas as pd
 from sklearn.model_selection import train_test_split
+from torch.utils.data import ConcatDataset
+from transformers import (
+    Blip2ForConditionalGeneration,
+    Blip2Processor,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+)
 
-import torch
-import torch.nn.functional as F
-import functools
-
-from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
-from transformers import VisionEncoderDecoderModel, AutoImageProcessor
-from transformers import AutoTokenizer, default_data_collator
-
-from sartor.modules.dataset import ImgDataset
+from sartor.modules.blip2_dataset import (
+    Blip2CaptionDataset,
+    Blip2VQADataset,
+    blip2_collate_fn,
+)
 from sartor.modules.compute_metrics import compute_metrics
 
 
-class SARTrainer(Seq2SeqTrainer):
-    def __init__(self, encoder_lr, *args, **kwargs):
-        self.encoder_lr = encoder_lr
+class Blip2Trainer(Seq2SeqTrainer):
+    """Trainer with discriminative learning rates for vision encoder vs Q-Former."""
+
+    def __init__(self, vision_lr, *args, **kwargs):
+        self.vision_lr = vision_lr
         super().__init__(*args, **kwargs)
 
     def create_optimizer(self):
         if self.optimizer is not None:
             return self.optimizer
 
-        encoder_params = []
-        decoder_params = []
+        vision_params = []
+        other_params = []
         for name, param in self.model.named_parameters():
             if not param.requires_grad:
                 continue
-            if name.startswith("encoder"):
-                encoder_params.append(param)
+            if name.startswith("vision_model"):
+                vision_params.append(param)
             else:
-                decoder_params.append(param)
+                other_params.append(param)
 
         optimizer_cls, optimizer_kwargs = Seq2SeqTrainer.get_optimizer_cls_and_kwargs(
             self.args, self.model
         )
         base_lr = optimizer_kwargs.pop("lr", self.args.learning_rate)
 
-        self.optimizer = optimizer_cls(
-            [
-                {"params": encoder_params, "lr": self.encoder_lr},
-                {"params": decoder_params, "lr": base_lr},
-            ],
-            **optimizer_kwargs,
-        )
+        param_groups = [{"params": other_params, "lr": base_lr}]
+        if vision_params:
+            param_groups.append({"params": vision_params, "lr": self.vision_lr})
+
+        self.optimizer = optimizer_cls(param_groups, **optimizer_kwargs)
         return self.optimizer
+
+
+def load_vqa_data(vqa_dir, dataset_name):
+    """Load VQA CSV data from the specified dataset."""
+    csv_path = os.path.join(vqa_dir, f"{dataset_name}.csv")
+    df = pd.read_csv(csv_path)
+    df.columns = [col.strip() for col in df.columns]
+    return df
 
 
 @hydra.main(version_base=None, config_path="../../config", config_name="config")
 def main(config: DictConfig) -> None:
+    cfg = config["blip2"]
+
     if torch.cuda.is_available():
         device = torch.device("cuda")
-        print('There are %d GPU(s) available.' % torch.cuda.device_count())
-        print('We will use the GPU:', torch.cuda.get_device_name(0))
-
+        print(f"GPU available: {torch.cuda.get_device_name(0)}")
     else:
-        print('No GPU available, using the CPU instead.')
+        print("No GPU available, using CPU.")
         device = torch.device("cpu")
 
     num_workers = min(mp.cpu_count(), 8)
     orig_cwd = hydra.utils.get_original_cwd()
 
-    caps_dir = os.path.join(orig_cwd, config["fine_tune"]["caps_dir"])
-    imgs_dir = os.path.join(orig_cwd, config["fine_tune"]["imgs_dir"])
-    output_model = os.path.join(orig_cwd, config["fine_tune"]["output_model"])
-    pretrained_model = os.path.join(orig_cwd, config["pretrain"]["output_model"])
+    caps_dir = os.path.join(orig_cwd, cfg["ft_caps"])
+    imgs_dir = os.path.join(orig_cwd, cfg["ft_imgs"])
+    vqa_train_dir = os.path.join(orig_cwd, cfg["ft_vqa_train"])
+    output_model = os.path.join(orig_cwd, cfg["output_finetuned"])
 
-    feature_extractor = AutoImageProcessor.from_pretrained(pretrained_model, use_fast=False)
+    # Load from pretrained BLIP-2 (ours or Salesforce)
+    pretrained_path = os.path.join(orig_cwd, cfg["output_pretrained"])
+    model_path = pretrained_path if os.path.exists(pretrained_path) else cfg["model"]
+    print(f"Loading BLIP-2 from: {model_path}")
 
-    tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
-
-    df = pd.read_csv(caps_dir)
-    df.columns = [col.strip() for col in df.columns]
-
-    if "Caption Type" in df.columns:
-        df["Caption Type"] = df["Caption Type"].str.strip()
-        df = df[df["Caption Type"] == "complex caption"]
-        print(f"Filtered to complex captions: {len(df)} samples")
-
-    train_df, val_df = train_test_split(
-        df,
-        train_size=config["fine_tune"]["train_pct"],
-        random_state=config["fine_tune"]["seed"])
-
-    train_dataset = ImgDataset(
-        train_df,
-        root_dir=imgs_dir,
-        tokenizer=tokenizer,
-        feature_extractor=feature_extractor,
-        max_length=config["fine_tune"]["max_length"],
-        )
-
-    val_dataset = ImgDataset(
-        val_df,
-        root_dir = imgs_dir,
-        tokenizer=tokenizer,
-        feature_extractor = feature_extractor,
-        max_length=config["fine_tune"]["max_length"],
-        )
-
-    model = VisionEncoderDecoderModel.from_pretrained(pretrained_model)
-
-    # Freeze only early encoder stages — let later stages learn SAR features
-    encoder_frozen_stages = config["fine_tune"]["encoder_frozen_stages"]
-    frozen_encoder_prefixes = (
-        tuple(f"encoder.layers.{i}." for i in range(encoder_frozen_stages))
-        + ("embeddings.",)
+    processor = Blip2Processor.from_pretrained(
+        pretrained_path if os.path.exists(pretrained_path) else cfg["model"]
+    )
+    model = Blip2ForConditionalGeneration.from_pretrained(
+        model_path, torch_dtype=torch.float16,
     )
 
-    for name, param in model.encoder.named_parameters():
-        if name.startswith(frozen_encoder_prefixes):
-            param.requires_grad = False
+    # Freeze LLM, selectively unfreeze vision encoder
+    model.language_model.requires_grad_(False)
+    model.qformer.requires_grad_(True)
+    model.language_projection.requires_grad_(True)
 
-    # Freeze early decoder layers, keep wte unfrozen (tied to lm_head)
-    frozen_layers = config["fine_tune"]["decoder_frozen_layers"]
-    frozen_prefixes = tuple(f"transformer.h.{i}." for i in range(frozen_layers))
+    # Unfreeze last N layers of vision encoder
+    model.vision_model.requires_grad_(False)
+    n_unfreeze = cfg["unfreeze_vision_layers"]
+    if n_unfreeze > 0:
+        encoder_layers = model.vision_model.encoder.layers
+        for layer in encoder_layers[-n_unfreeze:]:
+            layer.requires_grad_(True)
+        model.vision_model.post_layernorm.requires_grad_(True)
+        print(f"Unfreeze last {n_unfreeze}/{len(encoder_layers)} vision encoder layers")
 
-    for name, param in model.decoder.named_parameters():
-        if name.startswith(frozen_prefixes) or "wpe" in name:
-            param.requires_grad = False
+    # Upcast trainable parts to float32 for stable gradients
+    model.qformer.float()
+    model.language_projection.float()
+    for param in model.vision_model.parameters():
+        if param.requires_grad:
+            param.data = param.data.float()
+    model.to(device)
 
-    def unshifted_loss(logits, labels, vocab_size, **kwargs):
-        return F.cross_entropy(logits.float().view(-1, vocab_size), labels.view(-1), ignore_index=-100)
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    print(f"Trainable: {trainable:,} / {total:,} ({100*trainable/total:.1f}%)")
 
-    model.loss_function = unshifted_loss
+    # --- Caption data ---
+    cap_df = pd.read_csv(caps_dir)
+    cap_df.columns = [col.strip() for col in cap_df.columns]
+    if "Caption Type" in cap_df.columns:
+        cap_df["Caption Type"] = cap_df["Caption Type"].str.strip()
+        cap_df = cap_df[cap_df["Caption Type"] == "complex caption"]
+    print(f"Caption samples: {len(cap_df)}")
 
-    model.config.eos_token_id = tokenizer.eos_token_id
-    model.config.pad_token_id = tokenizer.pad_token_id
-    model.config.decoder_start_token_id = tokenizer.bos_token_id
+    cap_train, cap_val = train_test_split(
+        cap_df, train_size=cfg["train_pct"], random_state=cfg["seed"]
+    )
+    train_cap_ds = Blip2CaptionDataset(
+        cap_train, imgs_dir, processor, cfg["max_target_length"],
+        prompt="Describe this SAR image in detail.",
+    )
+    val_cap_ds = Blip2CaptionDataset(
+        cap_val, imgs_dir, processor, cfg["max_target_length"],
+        prompt="Describe this SAR image in detail.",
+    )
 
-    gen = model.generation_config
+    # --- VQA data ---
+    vqa_name = cfg["vqa_dataset"]
+    vqa_train_name = f"{vqa_name}_train"
+    vqa_df = load_vqa_data(vqa_train_dir, vqa_train_name)
+    max_vqa = cfg["vqa_max_samples"]
+    if max_vqa > 0 and len(vqa_df) > max_vqa:
+        vqa_df = vqa_df.sample(n=max_vqa, random_state=cfg["seed"])
+    print(f"VQA samples ({vqa_name}): {len(vqa_df)}")
 
-    gen.eos_token_id = tokenizer.eos_token_id
-    gen.pad_token_id = tokenizer.pad_token_id
-    gen.decoder_start_token_id = tokenizer.bos_token_id
+    vqa_train, vqa_val = train_test_split(
+        vqa_df, train_size=cfg["train_pct"], random_state=cfg["seed"]
+    )
+    train_vqa_ds = Blip2VQADataset(
+        vqa_train, imgs_dir, processor, cfg["max_input_length"], cfg["max_target_length"]
+    )
+    val_vqa_ds = Blip2VQADataset(
+        vqa_val, imgs_dir, processor, cfg["max_input_length"], cfg["max_target_length"]
+    )
 
-    gen.max_new_tokens = 60
-    gen.min_new_tokens = 8
-    gen.num_beams = 6
-    gen.num_beam_groups = 3
-    gen.diversity_penalty = 1.0
-    gen.early_stopping = True
-    gen.no_repeat_ngram_size = 3
-    gen.length_penalty = 1.2
+    # --- Combine datasets ---
+    train_dataset = ConcatDataset([train_cap_ds, train_vqa_ds])
+    val_dataset = ConcatDataset([val_cap_ds, val_vqa_ds])
+    print(f"Total training samples: {len(train_dataset)} "
+          f"(caption: {len(train_cap_ds)}, VQA: {len(train_vqa_ds)})")
+
+    collate_fn = functools.partial(
+        blip2_collate_fn, pad_token_id=processor.tokenizer.pad_token_id
+    )
 
     training_args = Seq2SeqTrainingArguments(
         output_dir=output_model,
-        per_device_train_batch_size=config["fine_tune"]["train_batch_size"],
-        per_device_eval_batch_size=config["fine_tune"]["val_batch_size"],
+        per_device_train_batch_size=cfg["train_batch_size"],
+        per_device_eval_batch_size=cfg["val_batch_size"],
+        gradient_accumulation_steps=cfg["grad_accum_steps"],
         predict_with_generate=True,
         do_train=True,
         do_eval=True,
         save_strategy="steps",
         logging_strategy="steps",
-        eval_strategy=config["fine_tune"]["eval_strategy"],
-        eval_steps=config["fine_tune"]["eval_steps"],
+        eval_strategy=cfg["eval_strategy"],
+        eval_steps=cfg["eval_steps"],
+        logging_steps=cfg["logging_steps"],
+        save_steps=cfg["save_steps"],
+        warmup_steps=cfg["ft_warmup_steps"],
+        learning_rate=cfg["ft_lr"],
+        weight_decay=cfg["weight_decay"],
+        num_train_epochs=cfg["ft_epochs"],
+        dataloader_num_workers=num_workers,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        logging_steps=config["fine_tune"]["logging_steps"],
-        save_steps=config["fine_tune"]["save_steps"],
-        warmup_steps=config["fine_tune"]["warmup_steps"],
-        gradient_accumulation_steps=config["fine_tune"]["grad_accum_steps"],
-        learning_rate=config["fine_tune"]["lr"],
-        weight_decay=config["fine_tune"]["weight_decay"],
-        num_train_epochs=config["fine_tune"]["epochs"],
-        dataloader_num_workers=num_workers,
         load_best_model_at_end=True,
         overwrite_output_dir=True,
         save_total_limit=1,
-        fp16=True,
+        bf16=True,
         optim="adamw_8bit",
-        label_smoothing_factor=config["fine_tune"]["label_smoothing_factor"],
+        generation_max_length=cfg["max_new_tokens"],
     )
 
-    trainer = SARTrainer(
-        encoder_lr=config["fine_tune"]["encoder_lr"],
-        processing_class=tokenizer,
+    trainer = Blip2Trainer(
+        vision_lr=cfg["ft_vision_lr"],
         model=model,
         args=training_args,
-        compute_metrics=functools.partial(compute_metrics, tokenizer=tokenizer),
+        processing_class=processor.tokenizer,
+        compute_metrics=functools.partial(
+            compute_metrics, tokenizer=processor.tokenizer
+        ),
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        data_collator=default_data_collator,
+        data_collator=collate_fn,
     )
+    trainer.model_accepts_loss_kwargs = False
 
     trainer.train()
     trainer.save_model()
-    feature_extractor.save_pretrained(training_args.output_dir)
-    tokenizer.save_pretrained(training_args.output_dir)
+    processor.save_pretrained(output_model)
+
 
 if __name__ == "__main__":
     main()
